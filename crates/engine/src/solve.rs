@@ -41,7 +41,8 @@ impl Solver {
         let mut best = -65;
         if empties >= ORDER_MIN_EMPTIES {
             // Fastest first: try moves that leave the opponent the fewest replies.
-            let mut list = [(0u32, 0u8, Board::initial()); 32];
+            // At most 33 legal moves are possible in any reachable position.
+            let mut list = [(0u32, 0u8, Board::initial()); 34];
             let mut n = 0;
             let mut m = moves;
             while m != 0 {

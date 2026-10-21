@@ -5,7 +5,7 @@
 //! semantics: a pass does not consume depth; depth 0 = evaluate; finished game =
 //! terminal_value.
 
-use othello_engine::eval::{evaluate, terminal_value};
+use othello_engine::eval::{evaluate, terminal_value, EVAL_LIMIT};
 use othello_engine::rng::XorShift64;
 use othello_engine::search::{Limits, Searcher, INF};
 use othello_engine::solve::Solver;
@@ -209,4 +209,44 @@ fn depth3_beats_random_at_least_99_percent() {
         }
     }
     assert!(wins >= 990, "only {wins}/1000 wins against random play");
+}
+
+#[test]
+fn terminal_values_dominate_evaluation_and_have_the_right_sign() {
+    let mut rng = XorShift64::new(11);
+    for _ in 0..2000 {
+        let b = random_position(&mut rng, 70);
+        assert!(evaluate(&b).abs() <= EVAL_LIMIT);
+        if b.is_game_over() {
+            let v = terminal_value(&b);
+            let s = b.final_score();
+            assert_eq!(v.signum(), s.signum());
+            if s != 0 {
+                assert!(v.abs() > EVAL_LIMIT);
+            }
+        }
+    }
+}
+
+#[test]
+fn play_search_is_exact_near_the_end() {
+    let mut rng = XorShift64::new(123);
+    for _ in 0..100 {
+        let b = random_position(&mut rng, 51);
+        if b.is_game_over() || b.empties().count_ones() > 10 {
+            continue;
+        }
+        let r = Searcher::new().search(
+            &b,
+            Limits {
+                max_depth: Some(1),
+                ..Limits::default()
+            },
+        );
+        let s = exact(&b);
+        assert_eq!(r.value.signum(), s.signum());
+        if let Some(m) = r.best {
+            assert_eq!(-exact(&b.play(m)), s);
+        }
+    }
 }

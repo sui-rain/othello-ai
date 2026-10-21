@@ -6,15 +6,15 @@
 //! - the root value at a fixed depth equals plain minimax at that depth.
 
 use crate::board::Board;
-use crate::eval::{evaluate, terminal_value};
+use crate::eval::{evaluate, terminal_value, WIN_BONUS};
+use crate::solve::Solver;
 use std::time::Instant;
 
 /// Larger than any reachable score.
 pub const INF: i32 = 1_000_000;
 
-/// In [`Searcher::search`], positions with at most this many empties are searched
-/// to the end of the game (exact), whatever the depth limit. Time and node limits
-/// still apply.
+/// In [`Searcher::search`], positions with at most this many empties are solved
+/// exactly with the endgame [`Solver`], whatever the depth limit.
 pub const EXACT_EMPTIES: u32 = 10;
 
 /// Result of a root search.
@@ -142,11 +142,18 @@ impl Searcher {
         self.nodes = 0;
         self.stopped = false;
         let empties = b.empties().count_ones();
-        let max_depth = if empties <= EXACT_EMPTIES {
-            empties.max(1)
-        } else {
-            limits.max_depth.unwrap_or(empties.max(1)).max(1)
-        };
+        if empties <= EXACT_EMPTIES {
+            let mut solver = Solver::new();
+            let r = solver.solve(b);
+            self.nodes = solver.nodes;
+            return SearchResult {
+                value: r.score * 100 + r.score.signum() * WIN_BONUS,
+                best: r.best,
+                depth: empties,
+                nodes: solver.nodes,
+            };
+        }
+        let max_depth = limits.max_depth.unwrap_or(empties).max(1);
 
         self.limits = Limits::default();
         let (v, m) = self.root(b, 1).expect("unlimited search cannot stop");
@@ -158,7 +165,7 @@ impl Searcher {
         };
         self.limits = limits;
         // Past the number of empties the search is already exact.
-        for depth in 2..=max_depth.min(empties.max(1)) {
+        for depth in 2..=max_depth.min(empties) {
             match self.root(b, depth) {
                 Some((v, m)) => {
                     result = SearchResult {
