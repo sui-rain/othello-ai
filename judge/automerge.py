@@ -5,7 +5,8 @@ Conditions, all required:
   - exactly one open pull request from HEAD_BRANCH (auto/*) in this repository,
     whose head is still HEAD_SHA (no pushes since the judge ran);
   - protected paths and dependency allow-list pass (re-run here from main);
-  - every required CI job on HEAD_SHA concluded 'success'.
+  - every required CI job on HEAD_SHA concluded 'success';
+  - it was judged against the current main, and in at most MAX_ATTEMPTS runs.
 Merges with squash, pinned to HEAD_SHA. Exits non-zero (and does not merge)
 otherwise. Branch protection rules on main still apply to the merge.
 """
@@ -15,6 +16,7 @@ import os
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 REQUIRED_CHECKS = {
@@ -23,6 +25,7 @@ REQUIRED_CHECKS = {
     "judge (endgame, identical, speed or strength)",
 }
 HERE = os.path.dirname(os.path.abspath(__file__))
+MAX_ATTEMPTS = 3
 
 
 def api(method, path, body=None):
@@ -68,8 +71,21 @@ def main():
                       text=True, check=True).stdout.strip() != head_sha:
         fail("fetched head does not match")
     base_sha = pr["base"]["sha"]
+    # The judged commit must contain the current main (this checkout), so the
+    # judge compared against the engine that is actually being replaced.
+    if subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", head_sha]).returncode != 0:
+        fail("main has moved since this pull request was judged; update the branch to re-judge")
+
+    # Repeated attempts give a neutral change repeated chances to pass the SPRT.
+    runs = api("GET", f"/actions/workflows/judge.yml/runs?branch={urllib.parse.quote(branch)}&per_page=20")
+    attempts = [r for r in runs.get("workflow_runs", [])
+                if r.get("event") == "pull_request" and r.get("conclusion") in ("success", "failure")]
+    if len(attempts) > MAX_ATTEMPTS:
+        fail(f"{len(attempts)} judged attempts on this branch (limit {MAX_ATTEMPTS})")
+
     for cmd in (
         ["bash", f"{HERE}/check_protected.sh", base_sha, head_sha, f"{HERE}/protected-paths.txt"],
+        ["bash", f"{HERE}/check_source.sh", head_sha],
         ["bash", f"{HERE}/check_deps.sh", head_sha, f"{HERE}/allowed-deps.txt",
          f"{HERE}/allowed-local-crates.txt"],
     ):

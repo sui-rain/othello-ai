@@ -38,6 +38,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash judge/check_protected.sh "$BASE_SHA" "$HEAD_SHA" judge/protected-paths.txt
+      - name: Source restrictions
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash judge/check_source.sh "$HEAD_SHA"
       - name: Dependency allow-list
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

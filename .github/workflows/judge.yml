@@ -1,8 +1,12 @@
 name: Judge
 
 # Decides whether a pull request's engine may replace main's engine.
-# The judge scripts and bench data are always taken from main (base/), only the
-# engine source comes from the pull request (new/). Read-only, no secrets.
+# - build-new compiles the pull request (untrusted code) in its own job and
+#   hands over only the binary.
+# - judge builds main's engine, takes the judge and bench data from main, and
+#   runs the candidate as a separate unprivileged user that cannot write the
+#   workspace. The judge also checks its inputs did not change during the run.
+# Read-only token, no secrets.
 on:
   pull_request:
 
@@ -14,54 +18,101 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: judge scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      engine: ${{ steps.scope.outputs.engine }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Skip judging only for documentation-only changes
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git -c core.quotePath=false diff --no-renames --name-only "$BASE_SHA"...HEAD)"
+          others="$(printf '%s\n' "$changed" | grep -Ev '^(docs/.*\.md|TASKS\.md|README\.md)$' | sed '/^$/d' || true)"
+          if [ -n "$changed" ] && [ -z "$others" ]; then
+            echo "engine=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-new:
+    name: build candidate
+    needs: scope
+    if: needs.scope.outputs.engine == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the pull request's engine
+        run: rustup toolchain install && cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-engine
+          path: target/release/othello
+          retention-days: 3
+
   judge:
     name: judge (endgame, identical, speed or strength)
+    needs: [scope, build-new]
+    if: always() && needs.scope.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
-      - name: Check out main (trusted judge and bench)
+      - name: Documentation-only change
+        if: needs.scope.outputs.engine != 'true'
+        run: echo '{"result":"accepted","gate":"none","reason":"no engine change"}' > report.json
+      - name: Candidate build must have succeeded
+        if: needs.scope.outputs.engine == 'true' && needs.build-new.result != 'success'
+        run: |
+          echo '{"result":"rejected","gate":"build","reason":"candidate did not build"}' > report.json
+          exit 1
+      - name: Check out main (trusted judge, bench and reference engine)
+        if: needs.scope.outputs.engine == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
-      - name: Check out pull request (engine under test)
-        uses: actions/checkout@v4
+      - name: Download candidate
+        if: needs.scope.outputs.engine == 'true'
+        uses: actions/download-artifact@v4
         with:
-          path: new
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Does the pull request change the engine?
-        id: scope
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          name: candidate-engine
+          path: candidate
+      - name: Prepare sandbox user and tools
+        if: needs.scope.outputs.engine == 'true'
         run: |
-          cd new
-          if git diff --no-renames --name-only "$BASE_SHA"...HEAD | grep -Eq '^(crates/|Cargo\.lock$)'; then
-            echo "engine=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "engine=false" >> "$GITHUB_OUTPUT"
-            echo '{"result":"accepted","gate":"none","reason":"no engine change"}' > ../report.json
-          fi
-      - name: Install valgrind
-        if: steps.scope.outputs.engine == 'true'
-        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+          set -euo pipefail
+          sudo apt-get update -q && sudo apt-get install -y -q valgrind
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin othello-sandbox
+          sudo install -d -m 755 /opt/candidate
+          sudo install -m 755 candidate/othello /opt/candidate/othello
+          # The workspace stays writable only by the runner user.
+          chmod -R go-w "$GITHUB_WORKSPACE"
       - name: Build main's engine
-        if: steps.scope.outputs.engine == 'true'
+        if: needs.scope.outputs.engine == 'true'
         working-directory: base
         run: rustup toolchain install && cargo build --release --locked
-      - name: Build the pull request's engine
-        if: steps.scope.outputs.engine == 'true'
-        working-directory: new
-        run: rustup toolchain install && cargo build --release --locked
       - name: Judge
-        if: steps.scope.outputs.engine == 'true'
+        if: needs.scope.outputs.engine == 'true'
         env:
           SEED: ${{ github.run_id }}
         run: |
           python3 base/judge/judge.py \
             --base base/target/release/othello \
-            --new new/target/release/othello \
+            --new /opt/candidate/othello \
+            --new-prefix "sudo -n -u othello-sandbox --" \
+            --new-cleanup "sudo -n pkill -KILL -u othello-sandbox" \
             --bench base/bench \
             --seed "$SEED" \
             --out report.json \
