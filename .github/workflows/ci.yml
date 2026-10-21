@@ -31,5 +31,16 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Tests
         run: cargo test --locked
-      - name: Perft depth 10 and 11 (release)
+      - name: Release-only reference tests (perft 10/11, play vs random)
         run: cargo test --locked --release -p othello-engine -- --ignored
+
+  judge-selftest:
+    name: judge self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Judge unit tests
+        run: python3 -m unittest discover -s judge -v

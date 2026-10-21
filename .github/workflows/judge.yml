@@ -1,0 +1,76 @@
+name: Judge
+
+# Decides whether a pull request's engine may replace main's engine.
+# The judge scripts and bench data are always taken from main (base/), only the
+# engine source comes from the pull request (new/). Read-only, no secrets.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: judge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    name: judge (endgame, identical, speed or strength)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Check out main (trusted judge and bench)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: Check out pull request (engine under test)
+        uses: actions/checkout@v4
+        with:
+          path: new
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Does the pull request change the engine?
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cd new
+          if git diff --no-renames --name-only "$BASE_SHA"...HEAD | grep -Eq '^(crates/|Cargo\.lock$)'; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "engine=false" >> "$GITHUB_OUTPUT"
+            echo '{"result":"accepted","gate":"none","reason":"no engine change"}' > ../report.json
+          fi
+      - name: Install valgrind
+        if: steps.scope.outputs.engine == 'true'
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Build main's engine
+        if: steps.scope.outputs.engine == 'true'
+        working-directory: base
+        run: rustup toolchain install && cargo build --release --locked
+      - name: Build the pull request's engine
+        if: steps.scope.outputs.engine == 'true'
+        working-directory: new
+        run: rustup toolchain install && cargo build --release --locked
+      - name: Judge
+        if: steps.scope.outputs.engine == 'true'
+        env:
+          SEED: ${{ github.run_id }}
+        run: |
+          python3 base/judge/judge.py \
+            --base base/target/release/othello \
+            --new new/target/release/othello \
+            --bench base/bench \
+            --seed "$SEED" \
+            --out report.json \
+            --max-seconds 15000
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-report
+          path: report.json
+          if-no-files-found: ignore
+          retention-days: 90

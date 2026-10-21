@@ -1,0 +1,73 @@
+name: Report
+
+# Every morning (07:00 JST): collect the night's judge results, benchmark main,
+# tag main if it changed, append to the `data` branch and publish the graph page.
+# Runs only trusted code from main; judge reports from pull requests are parsed
+# as untrusted data by judge/report.py.
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 07:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: write   # data branch and champion tags
+  actions: read     # list judge runs, download their reports
+  pull-requests: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Check out data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git worktree add ../data origin/data -B data
+          else
+            git worktree add --orphan -b data ../data
+          fi
+      - name: Install valgrind
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Build main
+        run: rustup toolchain install && cargo build --release --locked
+      - name: Collect and benchmark
+        id: report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 judge/report.py --repo "${{ github.repository }}" --data ../data \
+            --site _site --engine target/release/othello --bench bench \
+            --commit "$(git rev-parse HEAD)"
+      - name: Save data branch
+        working-directory: ../data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.csv bench.csv
+          git commit -m "report $(TZ=Asia/Tokyo date +%F)" || echo "nothing to commit"
+          git push origin data
+      - name: Tag main as champion
+        run: |
+          tag="champion-$(TZ=Asia/Tokyo date +%Y%m%d)"
+          last="$(git describe --tags --abbrev=0 --match 'champion-*' 2>/dev/null || true)"
+          if [ -z "$last" ] || [ "$(git rev-list -n1 "$last")" != "$(git rev-parse HEAD)" ]; then
+            git tag "$tag" && git push origin "$tag" || echo "tag exists"
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - uses: actions/deploy-pages@v4

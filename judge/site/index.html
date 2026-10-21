@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>othello-ai 改善ログ</title>
+<style>
+:root{
+  --bg:#f4f6f3; --card:#ffffff; --ink:#1b241e; --muted:#5f6b63; --line:#d9dfd9;
+  --a:#1f6f4a; --b:#3b5bab; --ok:#1f7a4d; --ng:#b33a2e; --hold:#9a6a00;
+  --ok-soft:#dff1e6; --ng-soft:#f8e2df; --hold-soft:#f7ecd2;
+  font-family: "Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111613; --card:#19201b; --ink:#e3e9e4; --muted:#93a198; --line:#2b352e;
+  --a:#5cc28e; --b:#8aa6ea; --ok:#5cc28e; --ng:#ef7f71; --hold:#e0b453;
+  --ok-soft:#173025; --ng-soft:#3a1e1a; --hold-soft:#33290f; color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.6}
+.wrap{max-width:860px;margin:0 auto;padding:20px 16px 48px;display:grid;gap:16px}
+h1{font-size:1.35rem;margin:0}
+.sub{color:var(--muted);font-size:.85rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:8px;min-width:0}
+.card h2{font-size:1rem;margin:0}
+.latest{font-size:1.02rem;font-weight:700}
+svg{width:100%;height:auto;display:block}
+svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td.t{white-space:normal;min-width:180px}
+th{color:var(--muted);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:0 8px;border-radius:999px;font-size:.75rem;font-weight:700}
+.accepted{background:var(--ok-soft);color:var(--ok)}
+.rejected,.error{background:var(--ng-soft);color:var(--ng)}
+.hold{background:var(--hold-soft);color:var(--hold)}
+.empty{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>othello-ai 改善ログ</h1>
+    <div class="sub">毎晩AIが1件ずつ改善を試し、判定に合格したものだけが取り込まれます。毎朝7時ごろ更新。</div>
+  </header>
+  <section class="card"><h2>今朝の報告</h2><div class="latest" id="latest">読み込み中…</div></section>
+  <section class="card">
+    <h2>mainの命令数（少ないほど速い）</h2>
+    <div class="legend"><span><i style="background:var(--a)"></i>中盤探索（深さ6・60局面）</span><span><i style="background:var(--b)"></i>終盤読み切り（40局面）</span></div>
+    <div id="chart-ins"></div>
+  </section>
+  <section class="card">
+    <h2>FFO終盤テスト（#40から順に、1問120秒以内で解けた数）</h2>
+    <div id="chart-ffo"></div>
+  </section>
+  <section class="card">
+    <h2>判定の履歴</h2>
+    <div class="tbl"><table><thead><tr><th>日時</th><th>結果</th><th>判定</th><th>内容</th><th class="num">命令数比</th><th class="num">Elo</th></tr></thead><tbody id="hist"></tbody></table></div>
+  </section>
+</div>
+<script>
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c=='"'){if(text[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c=='"')q=true;else if(c==','){row.push(f);f=""}
+    else if(c=='\n'){row.push(f);rows.push(row);row=[];f=""}else if(c!='\r')f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}
+  const h=rows.shift()||[];return rows.filter(r=>r.length>1).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]||""])));
+}
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function el(tag,attrs,text){const e=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;return e}
+function lineChart(target,labels,series,opts={}){
+  const box=document.getElementById(target);box.textContent="";
+  const pts=series.flatMap(s=>s.values.filter(v=>v!=null));
+  if(labels.length<1||!pts.length){box.innerHTML='<div class="empty">まだデータがありません</div>';return}
+  const W=760,H=220,L=56,R=12,T=12,B=28;
+  let lo=opts.zero?0:Math.min(...pts),hi=Math.max(...pts);if(hi==lo){hi+=1;lo-=opts.zero?0:1}
+  const pad=(hi-lo)*0.08;hi+=pad;if(!opts.zero)lo-=pad;
+  const x=i=>L+(labels.length==1?(W-L-R)/2:i*(W-L-R)/(labels.length-1)),y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  const s=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
+  for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4,yy=y(v);
+    s.append(el("line",{x1:L,x2:W-R,y1:yy,y2:yy,stroke:css("--line"),"stroke-width":1}));
+    s.append(el("text",{x:L-6,y:yy+4,"text-anchor":"end"},opts.fmt?opts.fmt(v):Math.round(v)))}
+  const step=Math.max(1,Math.ceil(labels.length/6));
+  labels.forEach((lb,i)=>{if(i%step==0||i==labels.length-1)s.append(el("text",{x:x(i),y:H-8,"text-anchor":"middle"},lb.slice(5)))});
+  for(const se of series){const d=se.values.map((v,i)=>v==null?null:`${x(i)},${y(v)}`).filter(Boolean);
+    if(d.length>1)s.append(el("polyline",{points:d.join(" "),fill:"none",stroke:css(se.color),"stroke-width":2.5,"stroke-linejoin":"round"}));
+    se.values.forEach((v,i)=>{if(v!=null)s.append(el("circle",{cx:x(i),cy:y(v),r:i==se.values.length-1?4.5:2.5,fill:css(se.color)}))})}
+  box.append(s);
+}
+const GATE={speed:"速度",strength:"強さ",endgame:"終盤",identical:"一致",none:"変更なし"};
+const RES={accepted:"採用",rejected:"却下",hold:"保留",error:"エラー"};
+async function load(name){try{const r=await fetch(name,{cache:"no-store"});return r.ok?r:null}catch(e){return null}}
+(async()=>{
+  const lj=await load("latest.json");
+  document.getElementById("latest").textContent=lj?(await lj.json()).summary:"まだ報告がありません";
+  const bc=await load("bench.csv");const bench=bc?parseCSV(await bc.text()):[];
+  const n=v=>v===""||v==null?null:Number(v);
+  lineChart("chart-ins",bench.map(r=>r.date),[
+    {values:bench.map(r=>n(r.midgame_instructions)&&n(r.midgame_instructions)/1e9),color:"--a"},
+    {values:bench.map(r=>n(r.endgame_instructions)&&n(r.endgame_instructions)/1e9),color:"--b"}],
+    {fmt:v=>v.toFixed(1)+"G",zero:true});
+  lineChart("chart-ffo",bench.map(r=>r.date),[{values:bench.map(r=>n(r.ffo_solved)),color:"--a"}],{zero:true});
+  const hc=await load("history.csv");const hist=hc?parseCSV(await hc.text()):[];
+  const tb=document.getElementById("hist");
+  if(!hist.length){tb.innerHTML='<tr><td colspan="6" class="empty">まだ判定がありません</td></tr>'}
+  for(const r of hist.slice().reverse()){
+    const tr=document.createElement("tr");
+    const ratio=[r.midgame_ratio,r.endgame_ratio].filter(Boolean).map(Number);
+    const cells=[r.date,null,GATE[r.gate]||r.gate,(r.pr?"#"+r.pr+" ":"")+r.title+(r.reason?"（"+r.reason+"）":""),
+      ratio.length?Math.min(...ratio).toFixed(3):"",r.elo?(Number(r.elo)>0?"+":"")+r.elo:""];
+    cells.forEach((c,i)=>{const td=document.createElement("td");
+      if(i==1){const sp=document.createElement("span");sp.className="chip "+(RES[r.result]?r.result:"error");sp.textContent=RES[r.result]||r.result;td.append(sp)}
+      else td.textContent=c;
+      if(i==3)td.className="t";if(i>=4)td.className="num";tr.append(td)});
+    tb.append(tr)}
+})();
+</script>
+</body>
+</html>
