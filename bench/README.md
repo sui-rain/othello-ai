@@ -7,3 +7,4 @@
 - `openings.txt`：対戦用の8手目の局面集（重複除去・偏りの少ないもの）
 - `ffo/`：FFO終盤テスト #40〜#59 と正解の石差
 - `perft.txt`：中盤やパスの多い局面のperft値
+guard test
