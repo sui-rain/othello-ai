@@ -20,7 +20,7 @@ check() {  # <pathspec> <description> <extended regex>
 }
 
 for spec in 'crates/engine/src' 'crates/cli/src'; do
-  check "$spec" "threads, files, network, OS access" '\b(thread|fs|net|os|sync|ffi)::|\bspawn\b'
+  check "$spec" "threads, files, network, OS access" '::(thread|fs|net|os|sync|ffi)\b|\b(thread|fs|net|os|sync|ffi)::|\bspawn\b'
   check "$spec" "child processes" '\bCommand::|process::(Command|Child|Stdio)|process::\{[^}]*\b(Command|Child|Stdio)\b'
   check "$spec" "environment variables" '\benv::(var|vars|var_os|vars_os|set_var|remove_var)\b|\b(option_)?env!'
   check "$spec" "unsafe or foreign code" '\bunsafe\b|\bextern\b|\basm!|global_asm!|#\s*!?\[\s*(no_mangle|link|export_name)'
