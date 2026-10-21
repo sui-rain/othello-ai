@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/engine", "crates/cli"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = 1 # keep line info so callgrind can attribute instructions
+
+# Tests run perft and many random games; optimize them so CI stays fast.
+[profile.test]
+opt-level = 3

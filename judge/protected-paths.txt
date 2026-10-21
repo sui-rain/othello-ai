@@ -1,0 +1,10 @@
+# Paths that branches named auto/* (the unattended nightly agent) must not change.
+# One extended regular expression per line, matched against changed file paths.
+^bench/
+^judge/
+^\.github/
+(^|/)build\.rs$
+^\.cargo/
+^rust-toolchain
+^docs/requirements\.md$
+^CLAUDE\.md$

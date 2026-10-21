@@ -1,0 +1,13 @@
+[package]
+name = "othello-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "othello"
+path = "src/main.rs"
+
+[dependencies]
+othello-engine = { path = "../engine" }

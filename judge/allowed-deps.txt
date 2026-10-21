@@ -1,0 +1,2 @@
+# External crates allowed anywhere in the dependency tree (one name per line).
+# Adding a crate requires a supervised change to this file (it is protected).
