@@ -1,20 +1,21 @@
 # このリポジトリで作業するAIへのルール
 
-Rust製オセロエンジン。持ち主（sui）が見ていない間にAIが改善を進める。
+Rust製オセロエンジン（`sui-rain/othello-ai`）。持ち主（sui）が見ていない間にAIが改善を進める。
 要件は `docs/requirements.md`、決定の理由は `docs/decisions.md`、進捗は `docs/progress.md`、作業の順番は `TASKS.md`。
 
 ## 前提
-- 夜間の無人実行は、M4（`main` の保護ルールと必須チェックの設定）が終わるまで動かさない。保護ルールが無い状態で `gh pr merge --auto` を使うと、判定なしで取り込まれるおそれがある。
+- 夜間の無人実行は、`main` の保護ルールが有効なときだけ行う。実行の最初に `gh api repos/sui-rain/othello-ai/rules/branches/main` を確認し、`pull_request` と `required_status_checks` の両方が無ければ何もせずに終了する。
+- 取り込みはAutomergeワークフローが行う（`auto/` ブランチのプルリクエストで、Judge と CI が全部合格したときだけ）。AIは取り込み操作をしない。
 - 保護対象（`judge/protected-paths.txt`）はどのプルリクエストからも変更できない（Guardワークフローが `main` から実行されて検査する）。判定の仕組みを変えるのは持ち主の作業。
 
 ## 夜間の無人実行の手順
-1. 状態を確認する：`gh pr list --state open --search "head:auto/"` と、直近に閉じた `auto/` プルリクエストを見る。
+1. 状態を確認する：`gh api 'repos/sui-rain/othello-ai/pulls?state=open'` で `auto/` ブランチの開いたプルリクエストを、`gh api 'repos/sui-rain/othello-ai/pulls?state=closed&per_page=10'` で直近の結果を見る（GraphQLを使う `gh pr` 系のコマンドは使えない）。
    - 開いたままのプルリクエストがあれば、新しい改善は始めない。CIが失敗していれば原因を直して同じブランチにpushするか、直せなければ閉じて理由を `docs/progress.md` に書く。それで今夜の実行は終わり。
 2. `TASKS.md` の「改善候補」から、未完了（`- [ ]`）で依存が満たされ、`docs/progress.md` で「保留」「未解決」になっていない一番上の1件を選ぶ。
 3. ブランチ `auto/YYYYMMDD-<短い英語名>`（日付は日本時間）を作り、実装する。
 4. CIと同じコマンドで確認する（下の「確認コマンド」をそのまま実行）。
 5. 同じプルリクエストの中で、`TASKS.md` のその行を `- [x]` にし、`docs/progress.md` に1行追記する。
-6. プルリクエストを作り、`gh pr merge --auto --squash` で自動取り込みを予約して終了する。CIの結果は待たない。取り込むかどうかはCIの判定が決める。
+6. pushして、プルリクエストを作って終了する：`gh api repos/sui-rain/othello-ai/pulls -f title=... -f head=<ブランチ> -f base=main -f body=...`。CIの結果は待たない。取り込むかどうかはJudgeの判定が決め、合格すればAutomergeが取り込む。
 
 失敗の数え方：同じ候補で「CI不合格のまま閉じた」夜が3回になったら、`docs/progress.md` で「未解決」にし、見立てを書いて次の候補へ進む。回数は `docs/progress.md` に候補ごとに記録する。
 記録はすべてプルリクエスト経由で残す（`main` へ直接pushしない）。プルリクエストを作れない夜は、記録だけのプルリクエストを作る。

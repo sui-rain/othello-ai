@@ -1,0 +1,44 @@
+name: Automerge
+
+# Merges a nightly pull request (branch auto/*, same repository) once its Judge
+# and CI runs have both succeeded (triggered by whichever finishes last). Runs from main: it re-checks protected paths and dependencies
+# itself, requires every CI job on the head commit to have passed, and merges
+# exactly the judged commit. Pull-request code is never checked out or run.
+on:
+  workflow_run:
+    workflows: [Judge, CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+concurrency:
+  group: automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'auto/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out main (trusted)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge if every gate passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: python3 judge/automerge.py
