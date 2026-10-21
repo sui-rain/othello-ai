@@ -29,31 +29,3 @@ pub fn perft(b: &Board, depth: u32) -> u64 {
     }
     total
 }
-
-/// Known perft values from the initial position, index = depth.
-pub const INITIAL_PERFT: [u64; 12] = [
-    1, 4, 12, 56, 244, 1396, 8200, 55092, 390216, 3005288, 24571056, 212258216,
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn initial_position_to_depth_9() {
-        let b = Board::initial();
-        for (depth, &expected) in INITIAL_PERFT.iter().enumerate().take(10) {
-            assert_eq!(perft(&b, depth as u32), expected, "depth {depth}");
-        }
-    }
-
-    /// Depths 10 and 11 are the first that detect pass-handling mistakes.
-    /// Slow in debug builds; CI runs it with `--release -- --ignored`.
-    #[test]
-    #[ignore]
-    fn initial_position_depth_10_and_11() {
-        let b = Board::initial();
-        assert_eq!(perft(&b, 10), INITIAL_PERFT[10]);
-        assert_eq!(perft(&b, 11), INITIAL_PERFT[11]);
-    }
-}

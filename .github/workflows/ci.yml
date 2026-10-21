@@ -6,6 +6,7 @@ on:
     branches: [main]
 
 # Read-only token; no secrets are used by any job in this workflow.
+# Changes to this file are blocked by the Guard workflow, which runs from main.
 permissions:
   contents: read
 
@@ -14,38 +15,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  guard:
-    name: guard (protected paths, dependencies)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Take judge scripts from main, not from the PR
-        run: |
-          mkdir -p "$RUNNER_TEMP/judge"
-          if git cat-file -e origin/main:judge/check_protected.sh 2>/dev/null; then
-            for f in check_protected.sh check_deps.sh protected-paths.txt allowed-deps.txt; do
-              git show "origin/main:judge/$f" > "$RUNNER_TEMP/judge/$f"
-            done
-          else
-            cp judge/* "$RUNNER_TEMP/judge/"   # bootstrap: main has no judge yet
-          fi
-      - name: Protected paths (auto/ branches only)
-        if: github.event_name == 'pull_request'
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: bash "$RUNNER_TEMP/judge/check_protected.sh" origin/main "$HEAD_REF" "$RUNNER_TEMP/judge/protected-paths.txt"
-      - name: Dependency allow-list
-        run: bash "$RUNNER_TEMP/judge/check_deps.sh" "$RUNNER_TEMP/judge/allowed-deps.txt"
-
   test:
     name: fmt, clippy, tests, deep perft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install pinned toolchain
         run: rustup toolchain install   # reads rust-toolchain.toml
       - name: Format

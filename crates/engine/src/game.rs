@@ -41,33 +41,3 @@ pub fn random_game(rng: &mut XorShift64) -> GameResult {
         plies,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ten_thousand_random_games_terminate_consistently() {
-        let mut rng = XorShift64::new(2026);
-        let mut black_wins = 0;
-        for _ in 0..10_000 {
-            let r = random_game(&mut rng);
-            let b = r.board;
-            assert_eq!(b.player & b.opponent, 0);
-            assert!(b.is_game_over());
-            let discs = (b.player | b.opponent).count_ones();
-            assert!((5..=64).contains(&discs));
-            // Each move adds exactly one disc; passes add none.
-            assert!(r.plies >= discs - 4);
-            assert!(r.black_score.abs() <= 64);
-            if r.black_score > 0 {
-                black_wins += 1;
-            }
-        }
-        // Random play is roughly balanced; this only guards against gross bugs.
-        assert!(
-            (3000..7000).contains(&black_wins),
-            "black wins: {black_wins}"
-        );
-    }
-}

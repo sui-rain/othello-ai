@@ -1,0 +1,3 @@
+# Crates that may appear in Cargo.lock without a registry/git source (workspace members).
+othello-engine
+othello-cli

@@ -1,20 +1,49 @@
 #!/usr/bin/env bash
-# Fail if the dependency tree contains an external crate that is not allow-listed,
-# or if Cargo.lock is missing or out of date.
-# Usage: check_deps.sh <allowed-deps-file>
+# Fail if Cargo.lock at <head> lists a crate that is not allow-listed.
+# Usage: check_deps.sh <head-sha> <allowed-external-file> <allowed-local-file>
+#
+# Parses Cargo.lock as text instead of calling cargo, so no toolchain or config
+# chosen by the PR is ever run. The test job's `--locked` keeps the lock honest.
 set -euo pipefail
 
-allowed="$1"
-test -f Cargo.lock || { echo "Cargo.lock must be committed"; exit 1; }
+head="$1"
+allowed_external="$2"
+allowed_local="$3"
 
-external="$(cargo metadata --format-version 1 --locked \
-  | jq -r '.packages[] | select(.source != null) | .name' | sort -u)"
-permitted="$(grep -Ev '^\s*(#|$)' "$allowed" | sort -u || true)"
-extra="$(comm -23 <(printf '%s\n' "$external" | sed '/^$/d') <(printf '%s\n' "$permitted" | sed '/^$/d'))"
+load_list() {
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line//[[:space:]]/}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    printf '%s\n' "$line"
+  done < "$1"
+}
 
-if [[ -n "$extra" ]]; then
-  echo "crates not in the allow-list:"
-  echo "$extra"
+lock="$(git show "$head:Cargo.lock" 2>/dev/null)" || { echo "Cargo.lock must be committed"; exit 1; }
+
+# Emit "name<TAB>external|local" for each [[package]] block.
+packages="$(printf '%s\n' "$lock" | awk '
+  /^\[\[package\]\]/ { if (name != "") print name "\t" kind; name = ""; kind = "local"; next }
+  /^name = "/ { name = $3; gsub(/"/, "", name); next }
+  /^source = "/ { kind = "external"; next }
+  END { if (name != "") print name "\t" kind }
+')"
+
+ext_ok="$(load_list "$allowed_external" | sort -u)"
+loc_ok="$(load_list "$allowed_local" | sort -u)"
+bad=()
+while IFS=$'\t' read -r name kind; do
+  [[ -z "$name" ]] && continue
+  if [[ "$kind" == "external" ]]; then
+    grep -qxF -- "$name" <<<"$ext_ok" || bad+=("$name (external crate not allow-listed)")
+  else
+    grep -qxF -- "$name" <<<"$loc_ok" || bad+=("$name (local/path crate not allow-listed)")
+  fi
+done <<<"$packages"
+
+if (( ${#bad[@]} > 0 )); then
+  printf '%s\n' "${bad[@]}"
   exit 1
 fi
 echo "dependencies OK"

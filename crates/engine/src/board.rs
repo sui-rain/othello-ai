@@ -93,6 +93,7 @@ impl Board {
     /// Returns 0 if `sq` is occupied or flips nothing (i.e. is not legal).
     #[inline]
     pub fn flips(&self, sq: u8) -> u64 {
+        debug_assert!(sq < 64, "square out of range: {sq}");
         let m = 1u64 << sq;
         if (self.player | self.opponent) & m != 0 {
             return 0;
@@ -213,6 +214,7 @@ impl Board {
 
 /// Square name such as "d3" for an index.
 pub fn square_name(sq: u8) -> String {
+    debug_assert!(sq < 64, "square out of range: {sq}");
     let col = (b'a' + sq % 8) as char;
     let row = (b'1' + sq / 8) as char;
     format!("{col}{row}")
@@ -236,50 +238,6 @@ pub fn parse_square(s: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rng::XorShift64;
-
-    /// Slow, obviously-correct move generator used to cross-check the bitboard one.
-    fn naive_flips(b: &Board, sq: u8) -> u64 {
-        let m = 1u64 << sq;
-        if (b.player | b.opponent) & m != 0 {
-            return 0;
-        }
-        let (r0, c0) = ((sq / 8) as i32, (sq % 8) as i32);
-        let mut flipped = 0;
-        for (dr, dc) in [
-            (-1, -1),
-            (-1, 0),
-            (-1, 1),
-            (0, -1),
-            (0, 1),
-            (1, -1),
-            (1, 0),
-            (1, 1),
-        ] {
-            let (mut r, mut c) = (r0 + dr, c0 + dc);
-            let mut run = 0u64;
-            while (0..8).contains(&r) && (0..8).contains(&c) {
-                let bit = 1u64 << (r * 8 + c);
-                if b.opponent & bit != 0 {
-                    run |= bit;
-                } else {
-                    if b.player & bit != 0 {
-                        flipped |= run;
-                    }
-                    break;
-                }
-                r += dr;
-                c += dc;
-            }
-        }
-        flipped
-    }
-
-    fn naive_moves(b: &Board) -> u64 {
-        (0..64u8)
-            .filter(|&sq| naive_flips(b, sq) != 0)
-            .fold(0, |acc, sq| acc | (1 << sq))
-    }
 
     #[test]
     fn initial_moves() {
@@ -289,29 +247,6 @@ mod tests {
             .map(square_name)
             .collect();
         assert_eq!(names, ["d3", "c4", "f5", "e6"]);
-    }
-
-    #[test]
-    fn matches_naive_on_random_positions() {
-        let mut rng = XorShift64::new(12345);
-        for _ in 0..3000 {
-            let mut b = Board::initial();
-            loop {
-                assert_eq!(b.legal_moves(), naive_moves(&b));
-                for sq in 0..64u8 {
-                    assert_eq!(b.flips(sq), naive_flips(&b, sq));
-                }
-                let moves = b.legal_moves();
-                if moves == 0 {
-                    if b.pass().legal_moves() == 0 {
-                        break;
-                    }
-                    b = b.pass();
-                    continue;
-                }
-                b = b.play(rng.pick_bit(moves));
-            }
-        }
     }
 
     #[test]

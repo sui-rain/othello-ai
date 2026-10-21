@@ -1,29 +1,58 @@
 #!/usr/bin/env bash
-# Fail if a branch named auto/* changes a protected path.
-# Usage: check_protected.sh <base-ref> <head-branch-name> <protected-paths-file>
-# CI runs the copy of this script and of the paths file taken from main, not from the PR.
+# Fail if the commits between <base> and <head> change a protected path.
+# Usage: check_protected.sh <base-sha> <head-sha> <protected-paths-file>
+#
+# Runs from the trusted base checkout (guard.yml, pull_request_target). It only
+# reads git data of the PR head; it never builds or executes PR code.
 set -euo pipefail
 
 base="$1"
-branch="$2"
-patterns="$3"
+head="$2"
+patterns_file="$3"
 
-case "$branch" in
-  auto/*) ;;
-  *) echo "branch '$branch' is not an auto/ branch; protected-path check skipped"; exit 0 ;;
-esac
+# Load patterns robustly: keep a final line without newline, strip CR and
+# trailing whitespace, skip blanks and comments, reject invalid regexes.
+patterns=()
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line%$'\r'}"
+  line="${line%"${line##*[![:space:]]}"}"
+  [[ -z "$line" || "$line" == \#* ]] && continue
+  rc=0
+  printf '' | grep -E -- "$line" >/dev/null 2>&1 || rc=$?
+  if (( rc == 2 )); then
+    echo "invalid pattern in $patterns_file: $line"
+    exit 1
+  fi
+  patterns+=("$line")
+done < "$patterns_file"
+(( ${#patterns[@]} > 0 )) || { echo "no protected patterns loaded"; exit 1; }
 
-changed="$(git diff --name-only "$base"...HEAD)"
-violations=""
-while IFS= read -r pat; do
-  [[ -z "$pat" || "$pat" == \#* ]] && continue
-  hits="$(printf '%s\n' "$changed" | grep -E -- "$pat" || true)"
-  [[ -n "$hits" ]] && violations+="$hits"$'\n'
-done < "$patterns"
+# Every changed path, unquoted, with renames split into delete + add.
+mapfile -d '' changed < <(git -c core.quotePath=false diff --no-renames --name-only -z "$base...$head")
 
-if [[ -n "$violations" ]]; then
-  echo "auto/ branches must not change these protected files:"
-  printf '%s' "$violations" | sort -u
+violations=()
+for f in "${changed[@]}"; do
+  [[ -z "$f" ]] && continue
+  if [[ ! "$f" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    violations+=("$f (unusual characters in path)")
+    continue
+  fi
+  for pat in "${patterns[@]}"; do
+    rc=0
+    printf '%s\n' "$f" | grep -Eq -- "$pat" || rc=$?
+    if (( rc == 0 )); then
+      violations+=("$f")
+      break
+    elif (( rc == 2 )); then
+      echo "grep failed on pattern: $pat"
+      exit 1
+    fi
+  done
+done
+
+if (( ${#violations[@]} > 0 )); then
+  echo "this pull request changes protected files (the owner must make these changes):"
+  printf '  %s\n' "${violations[@]}"
   exit 1
 fi
-echo "no protected paths changed"
+echo "no protected paths changed (${#changed[@]} files checked)"

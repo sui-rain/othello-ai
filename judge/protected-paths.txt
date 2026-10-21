@@ -1,10 +1,13 @@
-# Paths that branches named auto/* (the unattended nightly agent) must not change.
-# One extended regular expression per line, matched against changed file paths.
+# Paths that no pull request may change (supervised changes go through the owner).
+# One extended regular expression per line, matched against every changed path,
+# including both the old and new name of a renamed file.
 ^bench/
 ^judge/
 ^\.github/
 (^|/)build\.rs$
 ^\.cargo/
 ^rust-toolchain
+^crates/engine/tests/
 ^docs/requirements\.md$
 ^CLAUDE\.md$
+^Cargo\.toml$
