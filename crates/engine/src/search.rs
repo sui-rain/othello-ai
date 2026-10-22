@@ -10,6 +10,9 @@ use crate::eval::{evaluate, terminal_value, WIN_BONUS};
 use crate::solve::Solver;
 use std::time::Instant;
 
+/// Corner squares (A1, H1, A8, H8).
+const CORNERS: u64 = 0x8100_0000_0000_0081;
+
 /// Larger than any reachable score.
 pub const INF: i32 = 1_000_000;
 
@@ -91,11 +94,33 @@ impl Searcher {
             return evaluate(b);
         }
         let mut best = -INF;
+        // Order moves only where the children are searched further: corners
+        // first, then the moves that leave the opponent the fewest replies.
+        let mut list: [(i32, Board); 40] = [(0, *b); 40];
+        let mut n = 0;
         let mut m = moves;
         while m != 0 {
             let sq = m.trailing_zeros() as u8;
             m &= m - 1;
-            let v = -self.alphabeta(&b.play(sq), depth - 1, -beta, -alpha);
+            let child = b.play(sq);
+            let key = if depth < 2 {
+                0
+            } else if CORNERS & (1u64 << sq) != 0 {
+                -100
+            } else {
+                child.legal_moves().count_ones() as i32
+            };
+            // Stable insertion keeps square order among equal keys.
+            let mut i = n;
+            while i > 0 && list[i - 1].0 > key {
+                list[i] = list[i - 1];
+                i -= 1;
+            }
+            list[i] = (key, child);
+            n += 1;
+        }
+        for &(_, child) in &list[..n] {
+            let v = -self.alphabeta(&child, depth - 1, -beta, -alpha);
             if v > best {
                 best = v;
                 if v > alpha {
