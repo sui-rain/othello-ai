@@ -184,8 +184,20 @@ impl Searcher {
             list[i] = (key, sq, child);
             n += 1;
         }
-        for &(_, sq, child) in &list[..n] {
-            let v = -self.alphabeta(&child, depth - 1, -beta, -alpha);
+        for (i, &(_, sq, child)) in list[..n].iter().enumerate() {
+            // The first move gets the full window; the rest only have to prove
+            // they are no better (narrow window), and are searched again with
+            // the full window only if they turn out to beat alpha.
+            let v = if i == 0 {
+                -self.alphabeta(&child, depth - 1, -beta, -alpha)
+            } else {
+                let v = -self.alphabeta(&child, depth - 1, -alpha - 1, -alpha);
+                if v > alpha && v < beta && !self.stopped {
+                    -self.alphabeta(&child, depth - 1, -beta, -alpha)
+                } else {
+                    v
+                }
+            };
             if v > best {
                 best = v;
                 best_sq = sq;
