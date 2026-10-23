@@ -41,12 +41,66 @@ pub struct Limits {
     pub max_nodes: Option<u64>,
 }
 
+/// Number of transposition table slots (fixed; a power of two).
+const TT_SIZE: usize = 1 << 18;
+
+/// Positions with less remaining depth than this skip the table (too cheap to pay off).
+const TT_MIN_DEPTH: u32 = 3;
+
+const TT_EXACT: u8 = 0;
+const TT_LOWER: u8 = 1;
+const TT_UPPER: u8 = 2;
+
+/// One table slot. The full position is stored, so a hit is never a collision.
+/// An empty slot has `depth == u8::MAX`.
+#[derive(Clone, Copy, Debug)]
+struct TtEntry {
+    player: u64,
+    opponent: u64,
+    value: i32,
+    depth: u8,
+    flag: u8,
+    best: u8,
+}
+
+const TT_EMPTY: TtEntry = TtEntry {
+    player: 0,
+    opponent: 0,
+    value: 0,
+    depth: u8::MAX,
+    flag: TT_EXACT,
+    best: 0,
+};
+
+#[inline]
+fn tt_index(b: &Board) -> usize {
+    let h = (b.player ^ b.opponent.rotate_left(32)).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ b.opponent.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    ((h ^ (h >> 29)).wrapping_mul(0xBF58_476D_1CE4_E5B9) >> 40) as usize & (TT_SIZE - 1)
+}
+
 /// Search state. Create a fresh one per root position in judge mode.
-#[derive(Debug, Default)]
+///
+/// The transposition table only reuses a stored result when it was searched to
+/// exactly the same remaining depth, so values equal plain minimax at that
+/// depth; stored moves only change the order in which moves are tried.
+#[derive(Debug)]
 pub struct Searcher {
     pub nodes: u64,
     limits: Limits,
     stopped: bool,
+    tt: Vec<TtEntry>,
+}
+
+impl Default for Searcher {
+    fn default() -> Self {
+        Searcher {
+            nodes: 0,
+            limits: Limits::default(),
+            stopped: false,
+            tt: vec![TT_EMPTY; TT_SIZE],
+        }
+    }
 }
 
 impl Searcher {
@@ -93,10 +147,29 @@ impl Searcher {
         if depth == 0 {
             return evaluate(b);
         }
+        let use_tt = depth >= TT_MIN_DEPTH;
+        let slot = if use_tt { tt_index(b) } else { 0 };
+        let mut tt_move = u8::MAX;
+        if use_tt {
+            let e = &self.tt[slot];
+            if e.depth != u8::MAX && e.player == b.player && e.opponent == b.opponent {
+                tt_move = e.best;
+                if e.depth as u32 == depth {
+                    match e.flag {
+                        TT_EXACT => return e.value,
+                        TT_LOWER if e.value >= beta => return e.value,
+                        TT_UPPER if e.value <= alpha => return e.value,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let alpha_orig = alpha;
         let mut best = -INF;
+        let mut best_sq = u8::MAX;
         // Order moves only where the children are searched further: corners
         // first, then the moves that leave the opponent the fewest replies.
-        let mut list: [(i32, Board); 40] = [(0, *b); 40];
+        let mut list: [(i32, u8, Board); 40] = [(0, 0, *b); 40];
         let mut n = 0;
         let mut m = moves;
         while m != 0 {
@@ -105,6 +178,8 @@ impl Searcher {
             let child = b.play(sq);
             let key = if depth < 2 {
                 0
+            } else if sq == tt_move {
+                -1000
             } else if CORNERS & (1u64 << sq) != 0 {
                 -100
             } else {
@@ -116,13 +191,14 @@ impl Searcher {
                 list[i] = list[i - 1];
                 i -= 1;
             }
-            list[i] = (key, child);
+            list[i] = (key, sq, child);
             n += 1;
         }
-        for &(_, child) in &list[..n] {
+        for &(_, sq, child) in &list[..n] {
             let v = -self.alphabeta(&child, depth - 1, -beta, -alpha);
             if v > best {
                 best = v;
+                best_sq = sq;
                 if v > alpha {
                     alpha = v;
                     if alpha >= beta {
@@ -130,6 +206,23 @@ impl Searcher {
                     }
                 }
             }
+        }
+        if use_tt && !self.stopped {
+            let flag = if best <= alpha_orig {
+                TT_UPPER
+            } else if best >= beta {
+                TT_LOWER
+            } else {
+                TT_EXACT
+            };
+            self.tt[slot] = TtEntry {
+                player: b.player,
+                opponent: b.opponent,
+                value: best,
+                depth: depth as u8,
+                flag,
+                best: best_sq,
+            };
         }
         best
     }
