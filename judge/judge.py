@@ -284,6 +284,14 @@ def check_timing(new, boards, ms=50):
 
 # ---------------------------------------------------------------- stage 3a
 
+def reclaim(engine, d):
+    """Files written by a sandboxed engine belong to the sandbox user and are
+    private to it; take them back so the judge can read and remove them."""
+    if engine.prefix and engine.prefix[0] == "sudo":
+        subprocess.run(["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", d],
+                       capture_output=True)
+
+
 def instructions(valgrind, engine, args, boards, timeout):
     d = tempfile.mkdtemp()
     os.chmod(d, 0o777)  # the sandbox user writes the profile here
@@ -295,6 +303,7 @@ def instructions(valgrind, engine, args, boards, timeout):
                              text=True, timeout=timeout)
         if res.returncode != 0:
             raise RuntimeError(f"valgrind failed: {res.stderr.strip()[-300:]}")
+        reclaim(engine, d)
         total, found = 0, False
         for name in os.listdir(d):
             with open(os.path.join(d, name)) as f:
@@ -309,6 +318,7 @@ def instructions(valgrind, engine, args, boards, timeout):
         return total
     finally:
         engine.cleanup()
+        reclaim(engine, d)
         shutil.rmtree(d, ignore_errors=True)
 
 
