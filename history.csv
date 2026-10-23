@@ -1,1 +1,2 @@
 date,pr,title,merged,result,gate,reason,midgame_ratio,endgame_ratio,elo,elo_lo,elo_hi,pairs,run_id
+2026-10-22 21:25,2,C1 手の並べ替え,no,error,speed,PermissionError: [Errno 13] Permission denied:  /tmp/tmpy59bxidl/cg.out.2863,,,,,,,39778283310
