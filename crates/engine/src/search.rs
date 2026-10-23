@@ -56,6 +56,9 @@ const TT_UPPER: u8 = 2;
 /// allocated zeroed (untouched memory costs nothing).
 type TtEntry = [u64; 3];
 
+/// Below this remaining depth every move is searched with the full window.
+const PVS_MIN_DEPTH: u32 = 4;
+
 #[inline]
 fn tt_pack(value: i32, depth: u32, flag: u8, best: u8) -> u64 {
     value as u32 as u64 | (depth as u64 + 1) << 32 | (flag as u64) << 40 | (best as u64) << 48
@@ -187,8 +190,9 @@ impl Searcher {
         for (i, &(_, sq, child)) in list[..n].iter().enumerate() {
             // The first move gets the full window; the rest only have to prove
             // they are no better (narrow window), and are searched again with
-            // the full window only if they turn out to beat alpha.
-            let v = if i == 0 {
+            // the full window only if they turn out to beat alpha. Near the
+            // leaves the re-searches cost more than they save, so skip it there.
+            let v = if i == 0 || depth < PVS_MIN_DEPTH {
                 -self.alphabeta(&child, depth - 1, -beta, -alpha)
             } else {
                 let v = -self.alphabeta(&child, depth - 1, -alpha - 1, -alpha);
