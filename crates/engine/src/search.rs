@@ -42,35 +42,24 @@ pub struct Limits {
 }
 
 /// Number of transposition table slots (fixed; a power of two).
-const TT_SIZE: usize = 1 << 18;
+const TT_SIZE: usize = 1 << 12;
 
 /// Positions with less remaining depth than this skip the table (too cheap to pay off).
-const TT_MIN_DEPTH: u32 = 3;
+const TT_MIN_DEPTH: u32 = 1;
 
 const TT_EXACT: u8 = 0;
 const TT_LOWER: u8 = 1;
 const TT_UPPER: u8 = 2;
 
-/// One table slot. The full position is stored, so a hit is never a collision.
-/// An empty slot has `depth == u8::MAX`.
-#[derive(Clone, Copy, Debug)]
-struct TtEntry {
-    player: u64,
-    opponent: u64,
-    value: i32,
-    depth: u8,
-    flag: u8,
-    best: u8,
-}
+/// One table slot: the full position (so a hit is never a collision) and the
+/// result packed into one word. All-zero means empty, so the table can be
+/// allocated zeroed (untouched memory costs nothing).
+type TtEntry = [u64; 3];
 
-const TT_EMPTY: TtEntry = TtEntry {
-    player: 0,
-    opponent: 0,
-    value: 0,
-    depth: u8::MAX,
-    flag: TT_EXACT,
-    best: 0,
-};
+#[inline]
+fn tt_pack(value: i32, depth: u32, flag: u8, best: u8) -> u64 {
+    value as u32 as u64 | (depth as u64 + 1) << 32 | (flag as u64) << 40 | (best as u64) << 48
+}
 
 #[inline]
 fn tt_index(b: &Board) -> usize {
@@ -98,7 +87,7 @@ impl Default for Searcher {
             nodes: 0,
             limits: Limits::default(),
             stopped: false,
-            tt: vec![TT_EMPTY; TT_SIZE],
+            tt: vec![[0; 3]; TT_SIZE],
         }
     }
 }
@@ -151,14 +140,15 @@ impl Searcher {
         let slot = if use_tt { tt_index(b) } else { 0 };
         let mut tt_move = u8::MAX;
         if use_tt {
-            let e = &self.tt[slot];
-            if e.depth != u8::MAX && e.player == b.player && e.opponent == b.opponent {
-                tt_move = e.best;
-                if e.depth as u32 == depth {
-                    match e.flag {
-                        TT_EXACT => return e.value,
-                        TT_LOWER if e.value >= beta => return e.value,
-                        TT_UPPER if e.value <= alpha => return e.value,
+            let [p, o, meta] = self.tt[slot];
+            if meta != 0 && p == b.player && o == b.opponent {
+                tt_move = (meta >> 48) as u8;
+                if (meta >> 32) as u8 as u32 == depth + 1 {
+                    let value = meta as u32 as i32;
+                    match (meta >> 40) as u8 {
+                        TT_EXACT => return value,
+                        TT_LOWER if value >= beta => return value,
+                        TT_UPPER if value <= alpha => return value,
                         _ => {}
                     }
                 }
@@ -215,14 +205,7 @@ impl Searcher {
             } else {
                 TT_EXACT
             };
-            self.tt[slot] = TtEntry {
-                player: b.player,
-                opponent: b.opponent,
-                value: best,
-                depth: depth as u8,
-                flag,
-                best: best_sq,
-            };
+            self.tt[slot] = [b.player, b.opponent, tt_pack(best, depth, flag, best_sq)];
         }
         best
     }
