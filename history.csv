@@ -1,2 +1,7 @@
 date,pr,title,merged,result,gate,reason,midgame_ratio,endgame_ratio,elo,elo_lo,elo_hi,pairs,run_id
 2026-10-22 21:25,2,C1 手の並べ替え,no,error,speed,PermissionError: [Errno 13] Permission denied:  /tmp/tmpy59bxidl/cg.out.2863,,,,,,,39778283310
+2026-10-23 14:13,,C1 手の並べ替え,no,hold,speed,"same answers, fewer instructions",0.40441,0.99999,,,,,39904532188
+2026-10-23 14:21,,C2 置換表,no,rejected,speed,same answers but not cheaper,1.00717,0.99999,,,,,39905324991
+2026-10-23 14:30,,C2 置換表,no,hold,speed,"same answers, fewer instructions",0.93589,0.99999,,,,,39906092255
+2026-10-24 00:42,,C3 ネガスカウト,no,rejected,speed,same answers but not cheaper,1.01275,0.99999,,,,,39980572916
+2026-10-24 00:55,,C3 ネガスカウト,no,hold,speed,"same answers, fewer instructions",0.98479,0.99999,,,,,39982381025
