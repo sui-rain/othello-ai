@@ -30,6 +30,24 @@ pub fn shift(b: u64, dir: usize) -> u64 {
     }
 }
 
+/// Squares at the end of a run of `mask` discs that starts next to a disc of
+/// `p`, looking along the line with step `dir` in both directions.
+#[inline(always)]
+fn moves_along(p: u64, mask: u64, dir: u32) -> u64 {
+    let mut l = mask & (p << dir);
+    let mut r = mask & (p >> dir);
+    l |= mask & (l << dir);
+    r |= mask & (r >> dir);
+    let mask_l = mask & (mask << dir);
+    let mask_r = mask & (mask >> dir);
+    let dir2 = dir * 2;
+    l |= mask_l & (l << dir2);
+    r |= mask_r & (r >> dir2);
+    l |= mask_l & (l << dir2);
+    r |= mask_r & (r >> dir2);
+    (l << dir) | (r >> dir)
+}
+
 /// An Othello position from the point of view of the side to move.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Board {
@@ -74,19 +92,14 @@ impl Board {
     pub fn legal_moves(&self) -> u64 {
         let p = self.player;
         let o = self.opponent;
-        let empty = self.empties();
-        let mut moves = 0u64;
-        for dir in 0..8 {
-            // Run of opponent discs adjacent to our discs, up to 6 long.
-            let mut x = shift(p, dir) & o;
-            x |= shift(x, dir) & o;
-            x |= shift(x, dir) & o;
-            x |= shift(x, dir) & o;
-            x |= shift(x, dir) & o;
-            x |= shift(x, dir) & o;
-            moves |= shift(x, dir) & empty;
-        }
-        moves
+        // Opponent discs on the B..G files: a run through them never wraps
+        // around the board edge, so no per-step edge masking is needed.
+        let inner = o & 0x7e7e_7e7e_7e7e_7e7e;
+        let moves = moves_along(p, inner, 1)
+            | moves_along(p, o, 8)
+            | moves_along(p, inner, 7)
+            | moves_along(p, inner, 9);
+        moves & self.empties()
     }
 
     /// Discs flipped by the side to move playing on `sq`.
@@ -247,6 +260,42 @@ mod tests {
             .map(square_name)
             .collect();
         assert_eq!(names, ["d3", "c4", "f5", "e6"]);
+    }
+
+    /// The straightforward direction-by-direction version, kept as a reference.
+    fn legal_moves_reference(b: &Board) -> u64 {
+        let empty = b.empties();
+        let mut moves = 0u64;
+        for dir in 0..8 {
+            let mut x = shift(b.player, dir) & b.opponent;
+            for _ in 0..5 {
+                x |= shift(x, dir) & b.opponent;
+            }
+            moves |= shift(x, dir) & empty;
+        }
+        moves
+    }
+
+    #[test]
+    fn legal_moves_matches_reference() {
+        let mut rng = crate::rng::XorShift64::new(12345);
+        for _ in 0..200_000 {
+            let a = rng.next_u64();
+            let c = rng.next_u64();
+            // Vary the density so sparse and crowded boards are both covered.
+            let (a, c) = match rng.below(3) {
+                0 => (a & c, !a & c),
+                1 => (a & rng.next_u64(), c & !a),
+                _ => (a, c & !a),
+            };
+            let b = Board::new(a, c).unwrap();
+            assert_eq!(
+                b.legal_moves(),
+                legal_moves_reference(&b),
+                "{}",
+                b.to_compact()
+            );
+        }
     }
 
     #[test]
