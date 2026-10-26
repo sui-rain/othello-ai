@@ -113,10 +113,15 @@ impl Board {
         }
         let p = self.player;
         let o = self.opponent;
+        // Most directions have no adjacent opponent disc, so skip those at once;
+        // otherwise extend the run and keep it only if one of our discs caps it.
         let mut flipped = 0u64;
         for dir in 0..8 {
-            let mut run = 0u64;
-            let mut t = shift(m, dir);
+            let mut run = shift(m, dir) & o;
+            if run == 0 {
+                continue;
+            }
+            let mut t = shift(run, dir);
             while t & o != 0 {
                 run |= t;
                 t = shift(t, dir);
@@ -295,6 +300,50 @@ mod tests {
                 "{}",
                 b.to_compact()
             );
+        }
+    }
+
+    /// The loop-based version, kept as a reference.
+    fn flips_reference(b: &Board, sq: u8) -> u64 {
+        let m = 1u64 << sq;
+        if (b.player | b.opponent) & m != 0 {
+            return 0;
+        }
+        let mut flipped = 0u64;
+        for dir in 0..8 {
+            let mut run = 0u64;
+            let mut t = shift(m, dir);
+            while t & b.opponent != 0 {
+                run |= t;
+                t = shift(t, dir);
+            }
+            if t & b.player != 0 {
+                flipped |= run;
+            }
+        }
+        flipped
+    }
+
+    #[test]
+    fn flips_matches_reference() {
+        let mut rng = crate::rng::XorShift64::new(777);
+        for _ in 0..50_000 {
+            let a = rng.next_u64();
+            let c = rng.next_u64();
+            let (a, c) = match rng.below(3) {
+                0 => (a & c, !a & c),
+                1 => (a & rng.next_u64(), c & !a),
+                _ => (a, c & !a),
+            };
+            let b = Board::new(a, c).unwrap();
+            for sq in 0..64u8 {
+                assert_eq!(
+                    b.flips(sq),
+                    flips_reference(&b, sq),
+                    "{} {sq}",
+                    b.to_compact()
+                );
+            }
         }
     }
 
