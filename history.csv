@@ -6,3 +6,4 @@ date,pr,title,merged,result,gate,reason,midgame_ratio,endgame_ratio,elo,elo_lo,e
 2026-10-24 00:42,,C3 ネガスカウト,no,rejected,speed,same answers but not cheaper,1.01275,0.99999,,,,,39980572916
 2026-10-24 00:55,,C3 ネガスカウト,no,hold,speed,"same answers, fewer instructions",0.98479,0.99999,,,,,39982381025
 2026-10-25 00:43,,C4 終盤ソルバー：残り数マスの専用ルーチン,no,hold,speed,"same answers, fewer instructions",0.99998,0.45802,,,,,40108281793
+2026-10-26 00:47,,C5 偶数理論：試したが効果なし（記録のみ）,no,hold,none,no engine change,,,,,,,40208583205
