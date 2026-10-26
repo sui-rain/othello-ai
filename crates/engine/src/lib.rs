@@ -2,6 +2,7 @@
 
 pub mod board;
 pub mod eval;
+mod eval_weights;
 pub mod game;
 pub mod perft;
 pub mod rng;
