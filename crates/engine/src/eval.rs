@@ -1,5 +1,7 @@
-//! Static evaluation: pattern tables learned from self-play plus mobility
-//! (integer only; see `examples/train_eval.rs` for how the weights are made).
+//! Static evaluation (integer only): a hand-written base (square weights and
+//! mobility) plus pattern tables learned from self-play as a correction. A
+//! pattern never seen in training has weight 0, so the base decides there.
+//! See `examples/train_eval.rs` for how the tables are made.
 //!
 //! Units: roughly 100 = one disc. Terminal positions are scored by
 //! [`terminal_value`], which always dominates any static evaluation.
@@ -11,6 +13,40 @@ use crate::eval_weights::{MOBILITY_WEIGHTS, PATTERN_WEIGHTS};
 pub const EVAL_LIMIT: i32 = 9_999;
 /// Added to the magnitude of every decided terminal score so wins beat any evaluation.
 pub const WIN_BONUS: i32 = 10_000;
+
+/// Classic square weights, row by row from A1.
+#[rustfmt::skip]
+const WEIGHTS: [i32; 64] = [
+    100, -20,  10,   5,   5,  10, -20, 100,
+    -20, -50,  -2,  -2,  -2,  -2, -50, -20,
+     10,  -2,  -1,  -1,  -1,  -1,  -2,  10,
+      5,  -2,  -1,  -1,  -1,  -1,  -2,   5,
+      5,  -2,  -1,  -1,  -1,  -1,  -2,   5,
+     10,  -2,  -1,  -1,  -1,  -1,  -2,  10,
+    -20, -50,  -2,  -2,  -2,  -2, -50, -20,
+    100, -20,  10,   5,   5,  10, -20, 100,
+];
+
+/// How much the hand-written base counts relative to the learned correction
+/// (a least-squares fit of the base to final disc differences gave about 11).
+pub const BASE_SCALE: i32 = 11;
+
+fn weighted(bits: u64) -> i32 {
+    let mut b = bits;
+    let mut s = 0;
+    while b != 0 {
+        s += WEIGHTS[b.trailing_zeros() as usize];
+        b &= b - 1;
+    }
+    s
+}
+
+/// The hand-written part: square weights plus mobility, before scaling.
+pub fn base_score(b: &Board) -> i32 {
+    let positional = weighted(b.player) - weighted(b.opponent);
+    let mobility = b.legal_moves().count_ones() as i32 - b.pass().legal_moves().count_ones() as i32;
+    positional + 15 * mobility
+}
 
 /// Number of game stages with their own weights (chosen by empty squares).
 pub const STAGES: usize = 3;
@@ -111,11 +147,53 @@ pub fn evaluate(b: &Board) -> i32 {
         sum += PATTERN_WEIGHTS[block + i] as i32;
     }
     let mobility = b.legal_moves().count_ones() as i32 - b.pass().legal_moves().count_ones() as i32;
-    (sum + MOBILITY_WEIGHTS[stage(b)] * mobility).clamp(-EVAL_LIMIT, EVAL_LIMIT)
+    let positional = weighted(b.player) - weighted(b.opponent);
+    let base = BASE_SCALE * (positional + 15 * mobility);
+    (base + sum + MOBILITY_WEIGHTS[stage(b)] * mobility).clamp(-EVAL_LIMIT, EVAL_LIMIT)
 }
 
 /// Value of a finished game from the side to move's point of view.
 pub fn terminal_value(b: &Board) -> i32 {
     let s = b.final_score();
     s * 100 + s.signum() * WIN_BONUS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transpose_swaps_rows_and_columns() {
+        for sq in 0..64u32 {
+            let (r, c) = (sq / 8, sq % 8);
+            assert_eq!(transpose(1u64 << sq), 1u64 << (c * 8 + r), "square {sq}");
+        }
+    }
+
+    #[test]
+    fn pattern_indices_stay_inside_their_tables() {
+        let mut rng = crate::rng::XorShift64::new(5);
+        for _ in 0..10_000 {
+            let a = rng.next_u64();
+            let c = rng.next_u64() & !a;
+            let b = Board::new(a, c).unwrap();
+            for (n, i) in pattern_indices(&b).into_iter().enumerate() {
+                let table = if n < 16 { n / 4 } else { 4 };
+                assert!(
+                    (table * TABLE_LEN..(table + 1) * TABLE_LEN).contains(&i),
+                    "line {n}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn evaluation_stays_within_the_limit() {
+        let mut rng = crate::rng::XorShift64::new(6);
+        for _ in 0..2_000 {
+            let a = rng.next_u64();
+            let c = rng.next_u64() & !a;
+            assert!(evaluate(&Board::new(a, c).unwrap()).abs() <= EVAL_LIMIT);
+        }
+    }
 }
