@@ -7,3 +7,7 @@ date,pr,title,merged,result,gate,reason,midgame_ratio,endgame_ratio,elo,elo_lo,e
 2026-10-24 00:55,,C3 ネガスカウト,no,hold,speed,"same answers, fewer instructions",0.98479,0.99999,,,,,39982381025
 2026-10-25 00:43,,C4 終盤ソルバー：残り数マスの専用ルーチン,no,hold,speed,"same answers, fewer instructions",0.99998,0.45802,,,,,40108281793
 2026-10-26 00:47,,C5 偶数理論：試したが効果なし（記録のみ）,no,hold,none,no engine change,,,,,,,40208583205
+2026-10-26 16:50,,C6 着手可能数の計算を高速化,no,hold,speed,"same answers, fewer instructions",0.66718,0.93266,,,,,40288292221
+2026-10-26 17:09,,C6.1 石を裏返す処理の高速化,no,hold,speed,"same answers, fewer instructions",0.95859,0.98775,,,,,40290334425
+2026-10-26 17:37,,C7 パターン評価の学習,no,hold,strength,stronger: +221.7 Elo,,,221.7,164.1,292.8,55,40293580825
+2026-10-27 00:53,,C8 小型ネットワーク：試したが効果なし（記録のみ）,no,hold,none,no engine change,,,,,,,40353721459
